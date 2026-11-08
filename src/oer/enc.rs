@@ -1125,11 +1125,10 @@ impl<'buffer, const RFC: usize, const EFC: usize> crate::Encoder<'buffer>
             if self.cursor.extension_bitmap_cursor == 0 {
                 self.extension_bitmap_reserve();
             }
-            let cursor = self.output.len();
-            // Since we need to calculate the unknown length of the data length, data must be encoded at first
-            // Swap the buffers here to avoid extra alloactions
-            // Also helps us on playing with mutability checks...
-            let mut encoder = Encoder::<0>::from_buffer(self.options, self.worker, self.output);
+            // The length goes first, so the value is encoded on its own. In fresh buffers: `self.worker` may be an
+            // enclosing extension addition's output, when this one is nested inside it.
+            let (mut output, mut worker) = (Vec::new(), Vec::new());
+            let mut encoder = Encoder::<0>::from_buffer(self.options, &mut output, &mut worker);
             E::encode_with_tag_and_constraints(
                 &value,
                 &mut encoder,
@@ -1137,10 +1136,8 @@ impl<'buffer, const RFC: usize, const EFC: usize> crate::Encoder<'buffer>
                 constraints,
                 Identifier::EMPTY,
             )?;
-            // Truncate the actual output buffer to the original state
-            encoder.worker.truncate(cursor);
-            Self::encode_length(encoder.worker, encoder.output.len())?;
-            self.output.append(self.worker);
+            Self::encode_length(self.output, output.len())?;
+            self.output.append(&mut output);
             self.set_extension_presence(true);
         } else {
             self.set_extension_presence(false);
@@ -1163,17 +1160,13 @@ impl<'buffer, const RFC: usize, const EFC: usize> crate::Encoder<'buffer>
             self.extension_bitmap_reserve();
         }
         self.is_extension_sequence = true;
-        // Since we need to calculate the unknown length of the data length, data must be encoded at first
-        // Swap the buffers here to avoid extra alloactions
-        // Also helps us on playing with mutability checks...
-        let cursor = self.output.len();
-        let mut encoder = Encoder::<0>::from_buffer(self.options, self.worker, self.output);
+        // In fresh buffers, as in `encode_extension_addition`.
+        let (mut output, mut worker) = (Vec::new(), Vec::new());
+        let mut encoder = Encoder::<0>::from_buffer(self.options, &mut output, &mut worker);
         value.encode(&mut encoder)?;
-        // Truncate the actual output buffer to the original state
-        encoder.worker.truncate(cursor);
         self.is_extension_sequence = false;
-        Self::encode_length(encoder.worker, encoder.output.len())?;
-        self.output.append(self.worker);
+        Self::encode_length(self.output, output.len())?;
+        self.output.append(&mut output);
         self.set_extension_presence(true);
         Ok(())
     }
